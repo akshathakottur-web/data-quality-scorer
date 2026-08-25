@@ -1,0 +1,27 @@
+============================================================
+AUTOMATIC DATA QUALITY REPORT
+============================================================
+Rows: 768  |  Columns: 9
+Guessed target column: Class
+
+OVERALL DATA QUALITY SCORE: 89.9/100
+STATUS: Good
+------------------------------------------------------------
+INDIVIDUAL SCORES:
+  - missing_values: 71.1/100
+  - duplicates: 100.0/100
+  - outliers_iqr: 94.2/100
+  - outliers_iforest: 84.8/100
+  - class_imbalance: 85/100
+  - constant_columns: 100.0/100
+  - correlated_features: 100/100
+  - anomalies: 84.8/100
+  - label_issues: 94.9/100
+  - feature_leakage: 100/100
+------------------------------------------------------------
+RECOMMENDATIONS:
+  1. Columns [Serum_Insulin] have over 40% missing values. Consider dropping them or using advanced imputation (e.g. KNN imputation).
+  2. Isolation Forest flagged multivariate outliers — combinations of feature values that are individually normal but jointly unusual. Review the flagged rows manually.
+  3. 39 records don't fit any typical cluster pattern in the data. Review these manually — they may be errors or genuinely rare cases worth understanding.
+  4. 4 rows have labels the model strongly disagrees with. These may be mislabeled — manual review recommended before training.
+============================================================
