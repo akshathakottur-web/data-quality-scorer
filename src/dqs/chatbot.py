@@ -17,6 +17,7 @@ Design principles (project standards):
 """
 
 import json
+import inspect
 import streamlit as st
 from groq import Groq
 from src.dqs.fixes import AVAILABLE_FIXES
@@ -230,9 +231,40 @@ def chat_turn(user_message: str, conversation_history: list,
                 )
                 continue
 
-            updated_df, fix_message = fix_fn(updated_df, **fn_args)
-            reply_parts.append(f"✅ {fix_message}")
-            fix_applied = True
+            # Validate fn_args against the real function signature before calling it,
+            # so a malformed tool call from the LLM never crashes the app.
+            sig = inspect.signature(fix_fn)
+            valid_params = set(sig.parameters.keys()) - {"df"}
+            required_params = {
+                name for name, param in sig.parameters.items()
+                if param.default is inspect.Parameter.empty and name != "df"
+            }
+
+            unexpected = set(fn_args.keys()) - valid_params
+            missing = required_params - set(fn_args.keys())
+
+            if unexpected:
+                reply_parts.append(
+                    f"⚠️ The assistant tried to use an invalid argument {list(unexpected)} "
+                    f"for '{fn_name}' — no changes made. Try rephrasing your request."
+                )
+                continue
+
+            if missing:
+                reply_parts.append(
+                    f"⚠️ Missing required info ({list(missing)}) to run '{fn_name}' — "
+                    f"please specify it, e.g. which column."
+                )
+                continue
+
+            try:
+                updated_df, fix_message = fix_fn(updated_df, **fn_args)
+                reply_parts.append(f"✅ {fix_message}")
+                fix_applied = True
+            except Exception as e:
+                reply_parts.append(
+                    f"⚠️ Couldn't apply the fix '{fn_name}': {str(e)}"
+                )
 
     if not reply_parts:
         reply_parts.append(
