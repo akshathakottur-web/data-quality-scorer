@@ -11,20 +11,32 @@ from src.dqs.imbalance import analyze_class_imbalance
 from src.dqs.redundant_features import detect_constant_columns, detect_correlated_features
 from src.dqs.anomalies import detect_anomalous_records
 from src.dqs.label_leakage import detect_label_issues, detect_feature_leakage
+from src.dqs.validity import detect_data_validity
+from src.dqs.row_quality import compute_row_quality
 from src.dqs.scoring import compute_overall_score
 from src.dqs.recommendations import generate_recommendations
 from src.dqs.report import generate_text_report, save_text_report, generate_visualizations
 
 
-def run_pipeline(filepath: str) -> dict:
-    df = load_csv(filepath)
+def run_pipeline_on_df(df) -> dict:
+    """
+    Run the full detection -> scoring -> recommendation pipeline on an
+    ALREADY-LOADED dataframe.
+
+    This is what makes re-analysis after a chatbot fix possible: the
+    original run_pipeline(filepath) always re-reads the file from disk,
+    which means it can never see in-memory fixes applied to a working
+    copy of the dataframe. Call this instead whenever you need to
+    re-score a dataframe that didn't come straight from load_csv().
+    """
     profile = profile_dataset(df)
     target = profile["guessed_target"]
     numeric_cols = profile["numeric_cols"]
+    id_like_cols = profile["id_like_cols"]
 
     all_reports = {
         "missing_values": analyze_missing_values(df),
-        "duplicates": analyze_duplicates(df),
+        "duplicates": analyze_duplicates(df, id_like_cols=id_like_cols),
         "outliers_iqr": detect_outliers_iqr(df, numeric_cols),
         "outliers_iforest": detect_outliers_isolation_forest(df, numeric_cols),
         "class_imbalance": analyze_class_imbalance(df, target),
@@ -33,6 +45,8 @@ def run_pipeline(filepath: str) -> dict:
         "anomalies": detect_anomalous_records(df, numeric_cols),
         "label_issues": detect_label_issues(df, target, numeric_cols),
         "feature_leakage": detect_feature_leakage(df, target, numeric_cols),
+        "validity": detect_data_validity(df, numeric_cols=numeric_cols, id_like_cols=id_like_cols),
+        "row_quality": compute_row_quality(df, numeric_cols=numeric_cols, id_like_cols=id_like_cols),
     }
 
     scoring = compute_overall_score(all_reports)
@@ -51,6 +65,16 @@ def run_pipeline(filepath: str) -> dict:
         "recommendations": recommendations,
         "report_text": report_text,
     }
+
+
+def run_pipeline(filepath: str) -> dict:
+    """
+    Load a CSV from disk, then run the full pipeline on it.
+    Thin wrapper around run_pipeline_on_df -- kept for the original
+    file-based entry point (CLI usage, first upload in the app).
+    """
+    df = load_csv(filepath)
+    return run_pipeline_on_df(df)
 
 
 def main():

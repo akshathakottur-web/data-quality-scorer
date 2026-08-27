@@ -14,9 +14,7 @@ import pandas as pd
 import tempfile
 import os
 
-from main import run_pipeline
-from src.dqs.chatbot import chat_turn
-from src.dqs.scoring import compute_overall_score
+from main import run_pipeline, run_pipeline_on_df
 
 
 def generate_pdf_report(report_text):
@@ -65,6 +63,10 @@ if "GROQ_API_KEY" not in st.secrets:
     st.error("Groq API key not configured. Add it to .streamlit/secrets.toml")
     st.stop()
 
+# Imported here (after the secrets check) since chatbot.py constructs the
+# Groq client at import time and would fail immediately without a key.
+from src.dqs.chatbot import chat_turn
+
 st.set_page_config(page_title="Data Quality Scorer", layout="wide")
 
 st.title("🔍 Automatic Data Quality Scoring System")
@@ -73,28 +75,30 @@ st.write("Upload a CSV file to automatically analyze its quality for machine lea
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
 if uploaded_file is not None:
-    # Detect a NEW file (different from the last one processed) and reset stale state
+    # Detect a NEW file (different from the last one processed) and reset ALL stale state --
+    # including cached results, so a new upload can't inherit the old file's analysis.
     if st.session_state.get("last_uploaded_filename") != uploaded_file.name:
         st.session_state.pop("working_df", None)
         st.session_state.pop("chat_history", None)
+        st.session_state.pop("results", None)
         st.session_state["last_uploaded_filename"] = uploaded_file.name
 
-    # Save uploaded file temporarily so our existing pipeline (which reads from disk) can use it
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+    # Only run the full pipeline once per file. On every subsequent Streamlit
+    # rerun (chat messages, widget interactions, etc.) we reuse the cached
+    # results instead of re-reading the original upload from disk -- which
+    # is what was silently discarding every chatbot fix before.
+    if "results" not in st.session_state:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            tmp.write(uploaded_file.getvalue())
+            tmp_path = tmp.name
 
-    with st.spinner("Analyzing dataset..."):
-        results = run_pipeline(tmp_path)
+        with st.spinner("Analyzing dataset..."):
+            st.session_state.results = run_pipeline(tmp_path)
 
-    # Read the CSV into memory ONCE, before cleaning up the temp file.
-    # Guard with session_state so re-runs (triggered by the chatbot) don't
-    # overwrite any fixes the user already applied.
-    if "working_df" not in st.session_state:
         st.session_state.working_df = pd.read_csv(tmp_path)
+        os.unlink(tmp_path)
 
-    os.unlink(tmp_path)  # safe to delete now — data is already in memory
-
+    results = st.session_state.results
     scoring = results["scoring"]
     profile = results["profile"]
 
@@ -242,7 +246,15 @@ if uploaded_file is not None:
         if result["fix_applied"]:
             st.session_state.working_df = result["updated_df"]
 
-            st.success("Fix applied! Re-running analysis...")
+            # THE ACTUAL FIX: re-run the full pipeline on the UPDATED
+            # dataframe (not the original upload) and replace the cached
+            # results. Everything downstream -- metrics, sub-scores,
+            # recommendations, visualizations, PDF report, and the next
+            # chatbot turn's grounding -- now reflects the fix.
+            with st.spinner("Re-analyzing updated dataset..."):
+                st.session_state.results = run_pipeline_on_df(st.session_state.working_df)
+
+            st.success("Fix applied! Analysis updated.")
 
             st.rerun()
 

@@ -49,9 +49,18 @@ def analyze_missing_values(df: pd.DataFrame) -> dict:
     }
 
 
-def analyze_duplicates(df: pd.DataFrame) -> dict:
+def analyze_duplicates(df: pd.DataFrame, id_like_cols: list = None) -> dict:
     """
     Analyze exact duplicate rows.
+
+    Parameters
+    ----------
+    id_like_cols : list, optional
+        Columns to exclude before checking for duplicates (e.g. a
+        primary-key 'id' column). Without this, a unique ID on every
+        row makes every row look "different" even when every other
+        field is an exact duplicate -- so real duplicates go undetected.
+        Pass profile['id_like_cols'] from profiler.profile_dataset here.
 
     Returns
     -------
@@ -62,7 +71,10 @@ def analyze_duplicates(df: pd.DataFrame) -> dict:
         - score: 0-100, higher is better
     """
     n_rows = len(df)
-    duplicate_mask = df.duplicated(keep="first")
+
+    check_df = df.drop(columns=id_like_cols or [], errors="ignore")
+
+    duplicate_mask = check_df.duplicated(keep="first")
     n_duplicates = int(duplicate_mask.sum())
     pct_duplicates = round((n_duplicates / n_rows) * 100, 2) if n_rows else 0.0
 

@@ -33,6 +33,39 @@ def generate_recommendations(all_reports: dict) -> list:
             f"Consider removing them with df.drop_duplicates() unless duplication is intentional."
         )
 
+    validity = all_reports.get("validity", {})
+    if validity.get("applicable"):
+        email_bad = {
+            col: v for col, v in validity.get("email_validity", {}).items() if v.get("n_invalid", 0) > 0
+        }
+        if email_bad:
+            details = ", ".join(f"{col} ({v['n_invalid']} invalid)" for col, v in email_bad.items())
+            recs.append(
+                f"Malformed email addresses found in: {details}. "
+                f"Validate against a proper email regex or a verification service before using these records."
+            )
+
+        date_bad = {
+            col: v for col, v in validity.get("date_validity", {}).items() if v.get("n_invalid", 0) > 0
+        }
+        if date_bad:
+            details = ", ".join(f"{col} ({v['n_invalid']} invalid)" for col, v in date_bad.items())
+            recs.append(
+                f"Unparseable or invalid dates found in: {details}. "
+                f"Standardize on a single date format (e.g. ISO 8601 YYYY-MM-DD) at the data-entry or ingestion layer."
+            )
+
+        range_bad = {
+            col: v for col, v in validity.get("range_validity", {}).items() if v.get("n_invalid", 0) > 0
+        }
+        if range_bad:
+            details = ", ".join(f"{col} ({v['n_invalid']} out of plausible range)" for col, v in range_bad.items())
+            recs.append(
+                f"Out-of-range values found in: {details}. "
+                f"These are implausible regardless of statistical distribution (e.g. negative salary, "
+                f"age over 120, rating above scale max) -- review and correct or drop these rows."
+            )
+
     iqr = all_reports.get("outliers_iqr", {})
     if iqr.get("pct_overall", 0) > 5:
         recs.append(
