@@ -268,11 +268,15 @@ def chat_turn(user_message: str, conversation_history: list,
                 reply_parts.append(f"⚠️ Unknown fix requested: {fn_name}")
                 continue
 
-            # FIX ONLY FOR drop_duplicate_rows:
-            # This function takes no arguments, so ignore any malformed
-            # empty arguments returned by the model.
-            if fn_name == "drop_duplicate_rows":
-                fn_args = {}
+            # Filter fn_args down to only the parameters this fix function
+            # actually declares (excluding the leading `df` arg). This is
+            # a general-purpose guard against malformed/extra arguments
+            # the model returns -- e.g. a stray "" key, a hallucinated
+            # parameter, or (for drop_duplicate_rows specifically) any
+            # arguments at all, since it takes none. Applies to every fix
+            # function uniformly instead of special-casing one by name.
+            accepted_params = set(inspect.signature(fix_fn).parameters) - {"df"}
+            fn_args = {k: v for k, v in fn_args.items() if k in accepted_params}
 
             # Build a case-insensitive lookup: lowercase name -> actual column name
             column_lookup = {c.lower(): c for c in df.columns}
