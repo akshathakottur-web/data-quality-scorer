@@ -20,6 +20,7 @@ Design principles (project standards):
 """
 
 import json
+import inspect
 import streamlit as st
 from groq import Groq
 from src.dqs.fixes import AVAILABLE_FIXES
