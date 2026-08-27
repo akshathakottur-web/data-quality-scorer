@@ -49,7 +49,11 @@ TOOLS = [
         "function": {
             "name": "drop_duplicate_rows",
             "description": "Remove exact duplicate rows from the dataset.",
-            "parameters": {"type": "object", "properties": {}},
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False
+            },
         },
     },
     {
@@ -146,6 +150,7 @@ def build_system_prompt(df, profile: dict, all_reports: dict, scoring: dict) -> 
         "anomalous_row_indices": all_reports.get("anomalies", {}).get("anomalous_indices"),
         "suspicious_label_indices": all_reports.get("label_issues", {}).get("suspicious_indices"),
         "suspicious_leakage_features": all_reports.get("feature_leakage", {}).get("suspicious_features"),
+
         # --- validity (email/date/range) findings ---
         "validity_applicable": validity.get("applicable", False),
         "invalid_emails_by_column": {
@@ -157,6 +162,7 @@ def build_system_prompt(df, profile: dict, all_reports: dict, scoring: dict) -> 
         "out_of_range_by_column": {
             col: v.get("n_invalid") for col, v in validity.get("range_validity", {}).items()
         } if validity.get("applicable") else None,
+
         # --- row-level quality (this is the AUTHORITATIVE overall score) ---
         "pct_rows_with_at_least_one_problem": row_quality.get("pct_problem_rows"),
         "row_quality_breakdown": row_quality.get("breakdown"),
@@ -188,9 +194,9 @@ STRICT RULES:
 4. If the user clearly asks you to FIX something, call the matching
    tool. Do not call a tool for vague or ambiguous requests -- ask a
    clarifying question instead.
-5. If a requested fix doesn't map to any available tool (e.g. fixing a
-   malformed email or an invalid date -- there is currently no tool for
-   these), say so plainly instead of guessing or calling the wrong tool.
+5. If a requested fix doesn't map to any available tool (e.g. fixing
+   a malformed email or an invalid date -- there is currently no tool
+   for these), say so plainly instead of guessing or calling the wrong tool.
 6. For remove_rows_by_index specifically: only ever pass indices that
    appear in anomalous_row_indices, isolation_forest_outlier_indices,
    suspicious_label_indices, or the duplicate row indices above. Never
@@ -234,7 +240,12 @@ def chat_turn(user_message: str, conversation_history: list,
     )
 
     choice = response.choices[0].message
-    updated_df = df
+
+    # IMPORTANT:
+    # Start cleaning from a COPY so the original dataframe is not
+    # directly modified by any fix function.
+    updated_df = df.copy()
+
     fix_applied = False
     reply_parts = []
 
@@ -244,6 +255,7 @@ def chat_turn(user_message: str, conversation_history: list,
     if choice.tool_calls:
         for call in choice.tool_calls:
             fn_name = call.function.name
+
             try:
                 fn_args = json.loads(call.function.arguments)
             except json.JSONDecodeError:
@@ -251,9 +263,16 @@ def chat_turn(user_message: str, conversation_history: list,
                 continue
 
             fix_fn = AVAILABLE_FIXES.get(fn_name)
+
             if not fix_fn:
                 reply_parts.append(f"⚠️ Unknown fix requested: {fn_name}")
                 continue
+
+            # FIX ONLY FOR drop_duplicate_rows:
+            # This function takes no arguments, so ignore any malformed
+            # empty arguments returned by the model.
+            if fn_name == "drop_duplicate_rows":
+                fn_args = {}
 
             # Build a case-insensitive lookup: lowercase name -> actual column name
             column_lookup = {c.lower(): c for c in df.columns}
@@ -304,6 +323,7 @@ def chat_turn(user_message: str, conversation_history: list,
 
             try:
                 updated_df, fix_message = fix_fn(updated_df, **fn_args)
+
             except Exception as e:
                 reply_parts.append(f"⚠️ Couldn't apply that fix ({fn_name}): {e}")
                 continue
